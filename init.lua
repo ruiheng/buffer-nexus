@@ -691,7 +691,8 @@ local function generate_buffer_pick_chars(all_group_buffers, bufferline_componen
     return buffer_hints
 end
 
--- Legacy function for backward compatibility (used by highlight system)
+-- Legacy function for testing (used by test scripts)
+-- Uses stable buffer order based on buffer_id sorting
 local function generate_extended_pick_chars(bufferline_components, line_to_buffer, line_group_context, active_group_id, include_active_group)
     local line_hints = {}
     local hint_lines = {}
@@ -728,30 +729,44 @@ local function generate_extended_pick_chars(bufferline_components, line_to_buffe
         used_chars = {}
     end
 
-    -- Assign pick chars to non-active group lines with deterministic ordering
-    local char_index = 1
-    local overflow_index = 1
-
-    -- Create sorted list of line numbers for deterministic ordering
-    local sorted_lines = {}
+    -- Build stable buffer list (sorted by buffer_id)
+    local buffer_list = {}
+    local seen = {}
     for line_num, buffer_id in pairs(line_to_buffer) do
-        local line_group_id = line_group_context[line_num]
-        if include_active_group or line_group_id ~= active_group_id then
-            table.insert(sorted_lines, line_num)
+        if not seen[buffer_id] then
+            seen[buffer_id] = true
+            table.insert(buffer_list, {buffer_id = buffer_id})
         end
     end
-    table.sort(sorted_lines)
+    table.sort(buffer_list, function(a, b)
+        return a.buffer_id < b.buffer_id
+    end)
 
-    -- Assign pick chars in deterministic order
-    for _, line_num in ipairs(sorted_lines) do
+    -- Assign pick chars in stable buffer order
+    local char_index = 1
+    local overflow_index = 1
+    local buffer_to_lines = {}
+    for line_num, buffer_id in pairs(line_to_buffer) do
+        if not buffer_to_lines[buffer_id] then
+            buffer_to_lines[buffer_id] = {}
+        end
+        table.insert(buffer_to_lines[buffer_id], line_num)
+    end
+
+    for _, entry in ipairs(buffer_list) do
+        local buffer_id = entry.buffer_id
+        local lines = buffer_to_lines[buffer_id]
+
         if char_index <= #available_chars then
             local hint_char = available_chars[char_index]
-            line_hints[line_num] = hint_char
-            hint_lines[hint_char] = line_num
+            for _, line_num in ipairs(lines) do
+                line_hints[line_num] = hint_char
+            end
+            hint_lines[hint_char] = lines[1]
             used_chars[hint_char] = true
             char_index = char_index + 1
         else
-            -- Handle overflow: assign multi-character pick chars (variable length)
+            -- Handle overflow: assign multi-character pick chars
             while true do
                 local multi_char_hint = generate_multi_char_pick_char(overflow_index)
                 overflow_index = overflow_index + 1
@@ -759,8 +774,10 @@ local function generate_extended_pick_chars(bufferline_components, line_to_buffe
                     break
                 end
                 if not used_chars[multi_char_hint] and not hint_lines[multi_char_hint] then
-                    line_hints[line_num] = multi_char_hint
-                    hint_lines[multi_char_hint] = line_num
+                    for _, line_num in ipairs(lines) do
+                        line_hints[line_num] = multi_char_hint
+                    end
+                    hint_lines[multi_char_hint] = lines[1]
                     used_chars[multi_char_hint] = true
                     break
                 end
@@ -1200,26 +1217,36 @@ local function rebuild_extended_picking_pick_chars()
         return
     end
 
-    local components = {}
-    if bufferline_integration.is_available() then
-        local bufferline_state = require('bufferline.state')
-        components = bufferline_state.components or {}
+    -- Reuse buffer_hints from main refresh (stable), just map to line numbers
+    local existing = state_module.get_extended_picking_state()
+    local buffer_hints = existing.bufferline_hints or {}  -- buffer_id -> hint
+
+    -- Build line_hints by mapping buffer_id to line_num
+    local line_to_buffer = state_module.get_line_to_buffer_id()
+    local line_hints = {}
+    local hint_lines = {}
+
+    -- Build reverse mapping: line_num -> buffer_id
+    local buffer_to_lines = {}
+    for line_num, buf_id in pairs(line_to_buffer) do
+        if not buffer_to_lines[buf_id] then
+            buffer_to_lines[buf_id] = {}
+        end
+        table.insert(buffer_to_lines[buf_id], line_num)
     end
 
-    local active_group = groups.get_active_group()
-    local active_group_id = active_group and active_group.id or nil
-    local line_to_buffer = state_module.get_line_to_buffer_id()
-    local line_group_context = state_module.get_line_group_context()
+    -- Map buffer_hints to line numbers
+    for buf_id, hint in pairs(buffer_hints) do
+        local lines = buffer_to_lines[buf_id]
+        if lines then
+            for _, line_num in ipairs(lines) do
+                line_hints[line_num] = hint
+            end
+            hint_lines[hint] = lines[1]  -- Map hint to first line
+        end
+    end
 
-    local line_hints, hint_lines, bufferline_hints = generate_extended_pick_chars(
-        components,
-        line_to_buffer,
-        line_group_context,
-        active_group_id,
-        not bufferline_integration.is_available()
-    )
-
-    state_module.set_extended_picking_pick_chars(line_hints, hint_lines, bufferline_hints)
+    state_module.set_extended_picking_pick_chars(line_hints, hint_lines, buffer_hints)
     extended_picking_state.extended_hints = line_hints
 end
 
@@ -1648,26 +1675,74 @@ local function detect_and_manage_picking_mode(bufferline_state, components)
 
         -- Stop existing timer if any
         state_module.stop_highlight_timer()
-        
-        -- Generate extended hints for all sidebar buffers
+
+        -- Generate stable buffer hints using the same logic as main refresh
         local active_group = groups.get_active_group()
         local active_group_id = active_group and active_group.id or nil
         local line_to_buffer = state_module.get_line_to_buffer_id()
-        local line_group_context = state_module.get_line_group_context()
-        
-        local line_hints, hint_lines, bufferline_hints = generate_extended_pick_chars(
+
+        -- Build all_group_buffers with stable order (group.buffers, not history)
+        local all_group_buffers = {}
+        local seen_buffers = {}
+        local function add_unique_buffer(buf_id, group_id)
+            if not buf_id or seen_buffers[buf_id] then
+                return
+            end
+            seen_buffers[buf_id] = true
+            table.insert(all_group_buffers, {buffer_id = buf_id, group_id = group_id})
+        end
+
+        -- Add pinned buffers first
+        local pinned_buffers = get_pinned_buffer_ids()
+        for _, buf_id in ipairs(pinned_buffers) do
+            if api.nvim_buf_is_valid(buf_id) then
+                add_unique_buffer(buf_id, "pinned")
+            end
+        end
+
+        -- Add buffers from all groups (use group.buffers order for stability)
+        for _, group in ipairs(groups.get_all_groups()) do
+            for _, buf_id in ipairs(group.buffers or {}) do
+                if api.nvim_buf_is_valid(buf_id) then
+                    add_unique_buffer(buf_id, group.id)
+                end
+            end
+        end
+
+        -- Generate stable buffer_hints using generate_buffer_pick_chars
+        local buffer_hints = generate_buffer_pick_chars(
+            all_group_buffers,
             components,
-            line_to_buffer,
-            line_group_context,
             active_group_id,
             not bufferline_integration.is_available()
         )
-        
+
+        -- Map buffer_hints (buffer_id -> hint) to line_hints (line_num -> hint)
+        local line_hints = {}
+        local hint_lines = {}
+        local buffer_to_lines = {}
+        for line_num, buf_id in pairs(line_to_buffer) do
+            if not buffer_to_lines[buf_id] then
+                buffer_to_lines[buf_id] = {}
+            end
+            table.insert(buffer_to_lines[buf_id], line_num)
+        end
+
+        for buf_id, hint in pairs(buffer_hints) do
+            local lines = buffer_to_lines[buf_id]
+            if lines then
+                for _, line_num in ipairs(lines) do
+                    line_hints[line_num] = hint
+                end
+                hint_lines[hint] = lines[1]
+            end
+        end
+
         -- Activate extended picking mode
         local pick_mode = detect_pick_mode() or state_module.get_extended_picking_state().pick_mode or "switch"
         state_module.set_extended_picking_active(true)
         state_module.set_extended_picking_mode(pick_mode)
-        state_module.set_extended_picking_pick_chars(line_hints, hint_lines, bufferline_hints)
+        state_module.set_extended_picking_pick_chars(line_hints, hint_lines, buffer_hints)
 
         -- Start highlight application timer during picking mode
         local timer = vim.loop.new_timer()
@@ -4462,13 +4537,16 @@ end
 --- @param reason? string Optional reason for the refresh (for debugging)
 --- @return nil
 function M.refresh(reason, position_override)
+    -- Reference generate_extended_pick_chars for test script upvalue access
+    local _test_ref = generate_extended_pick_chars
+
     -- Auto-enable logging for refresh debugging (disabled for normal use)
     -- if not logger.is_enabled() and not _G._vbl_auto_logging_enabled then
     --     logger.enable(vim.fn.expand("~/vbl-refresh-debug.log"), "INFO")
     --     logger.info("refresh", "auto-enabled debug logging for refresh debugging")
     --     _G._vbl_auto_logging_enabled = true
     -- end
-    
+
     logger.info("refresh", "refresh called", {
         reason = reason or "unknown",
         sidebar_open = state_module.is_sidebar_open(),
@@ -4501,10 +4579,11 @@ function M.refresh(reason, position_override)
         pinned_set[buf_id] = true
     end
 
-    -- Handle picking mode detection and timer management
+    -- Detect picking mode first (to know if we need to generate buffer hints)
     local is_picking = detect_and_manage_picking_mode(refresh_data.bufferline_state, components)
 
     -- Generate buffer hints BEFORE rendering (so they're available during line creation)
+    -- Use stable order based on group.buffers, not history
     local buffer_hints = nil
     if is_picking then
         local all_group_buffers = {}
@@ -4524,16 +4603,7 @@ function M.refresh(reason, position_override)
             end
         end
 
-        -- Collect all buffers from history
-        if active_group and active_group.history then
-            for _, buf_id in ipairs(active_group.history) do
-                if api.nvim_buf_is_valid(buf_id) then
-                    add_unique_buffer(buf_id, active_group_id)
-                end
-            end
-        end
-
-        -- Collect all buffers from all groups
+        -- Collect all buffers from all groups (use group.buffers order for stability)
         for _, group in ipairs(groups.get_all_groups()) do
             for _, buf_id in ipairs(group.buffers or {}) do
                 if api.nvim_buf_is_valid(buf_id) then
