@@ -7,6 +7,26 @@ local groups = require('buffer-nexus.groups')
 local logger = require('buffer-nexus.logger')
 local utils = require('buffer-nexus.utils')
 
+-- Format group label as "[n] name" or just "[n]" if name is empty
+local function format_group_label(group)
+    local number = group and (group.display_number or group.id)
+    local name = group and group.name or ""
+
+    if number ~= nil then
+        local label = "[" .. tostring(number) .. "]"
+        if name ~= "" then
+            label = label .. " " .. name
+        end
+        return label
+    end
+
+    if name ~= "" then
+        return name
+    end
+
+    return ""
+end
+
 -- Create group command
 local function create_group_command(args)
     local name = args.args
@@ -24,7 +44,7 @@ local function create_group_command(args)
 
     for _, g in ipairs(all_groups) do
         if g.id == group_id then
-            vim.notify("Created group: " .. g.name .. " (ID: " .. group_id .. ")", vim.log.levels.INFO)
+            vim.notify("Created group: " .. format_group_label(g) .. " (ID: " .. group_id .. ")", vim.log.levels.INFO)
             break
         end
     end
@@ -81,7 +101,7 @@ local function delete_group_command(args)
     end
 
     if groups.delete_group(target_group.id) then
-        vim.notify("Deleted group: " .. target_group.name, vim.log.levels.INFO)
+        vim.notify("Deleted group: " .. format_group_label(target_group), vim.log.levels.INFO)
 
         -- Refresh interface
         vim.schedule(function()
@@ -128,7 +148,7 @@ local function switch_group_command(args)
         -- Show current group information
         local active_group = groups.get_active_group()
         if active_group then
-            vim.notify("Current group: " .. active_group.name .. " (" .. #active_group.buffers .. " buffers)", vim.log.levels.INFO)
+            vim.notify("Current group: " .. format_group_label(active_group) .. " (" .. #active_group.buffers .. " buffers)", vim.log.levels.INFO)
         end
         return
     end
@@ -191,7 +211,7 @@ local function add_buffer_to_group_command(args)
     if groups.add_buffer_to_group(current_buffer, target_group.id) then
         local buffer_name = vim.api.nvim_buf_get_name(current_buffer)
         local short_name = vim.fn.fnamemodify(buffer_name, ":t")
-        vim.notify("Added buffer '" .. short_name .. "' to group: " .. target_group.name, vim.log.levels.INFO)
+        vim.notify("Added buffer '" .. short_name .. "' to group: " .. format_group_label(target_group), vim.log.levels.INFO)
     end
 end
 
@@ -289,7 +309,7 @@ local function move_group_up_command()
     end
 
     if groups.move_group_up(active_group.id) then
-        vim.notify("Moved group '" .. active_group.name .. "' up", vim.log.levels.INFO)
+        vim.notify("Moved group '" .. format_group_label(active_group) .. "' up", vim.log.levels.INFO)
 
         -- Refresh interface immediately
         vim.schedule(function()
@@ -311,7 +331,7 @@ local function move_group_down_command()
     end
 
     if groups.move_group_down(active_group.id) then
-        vim.notify("Moved group '" .. active_group.name .. "' down", vim.log.levels.INFO)
+        vim.notify("Moved group '" .. format_group_label(active_group) .. "' down", vim.log.levels.INFO)
 
         -- Refresh interface immediately
         vim.schedule(function()
@@ -349,7 +369,7 @@ local function move_group_to_position_command(args)
     end
 
     if groups.move_group_to_position(active_group.id, position) then
-        vim.notify("Moved group '" .. active_group.name .. "' to position " .. position, vim.log.levels.INFO)
+        vim.notify("Moved group '" .. format_group_label(active_group) .. "' to position " .. position, vim.log.levels.INFO)
 
         -- Refresh interface immediately
         vim.schedule(function()
@@ -626,7 +646,7 @@ function M.setup()
         local stats = groups.get_group_stats()
         
         vim.notify("Groups count: " .. #all_groups, vim.log.levels.INFO)
-        vim.notify("Active group: " .. (active_group and active_group.name or "none"), vim.log.levels.INFO)
+        vim.notify("Active group: " .. (active_group and format_group_label(active_group) or "none"), vim.log.levels.INFO)
         vim.notify("Stats: " .. vim.inspect(stats), vim.log.levels.INFO)
 
         -- Add bufferline integration status information
@@ -663,7 +683,7 @@ function M.setup()
         -- Show current status
         local active_group = groups.get_active_group()
         if active_group then
-            vim.notify(string.format("Active group: %s (%d buffers)", active_group.name, #active_group.buffers), vim.log.levels.INFO)
+            vim.notify(string.format("Active group: %s (%d buffers)", format_group_label(active_group), #active_group.buffers), vim.log.levels.INFO)
         else
             vim.notify("No active group", vim.log.levels.WARN)
         end
@@ -740,11 +760,11 @@ function M.setup()
             if #all_groups > 1 then
                 local group_names = {}
                 for _, group in ipairs(all_groups) do
-                    table.insert(group_names, group.name)
+                    table.insert(group_names, format_group_label(group))
                 end
-                vim.cmd('echo "Added \'' .. short_name .. '\' to \'' .. active_group.name .. '\' (also in: ' .. table.concat(group_names, ", ") .. ')"')
+                vim.cmd('echo "Added \'' .. short_name .. '\' to \'' .. format_group_label(active_group) .. '\' (also in: ' .. table.concat(group_names, ", ") .. ')"')
             else
-                vim.cmd('echo "Added \'' .. short_name .. '\' to \'' .. active_group.name .. '\'"')
+                vim.cmd('echo "Added \'' .. short_name .. '\' to \'' .. format_group_label(active_group) .. '\'"')
             end
 
             -- Refresh interface
@@ -789,11 +809,11 @@ function M.setup()
             if #remaining_groups > 0 then
                 local group_names = {}
                 for _, group in ipairs(remaining_groups) do
-                    table.insert(group_names, group.name)
+                    table.insert(group_names, format_group_label(group))
                 end
-                vim.notify("Removed '" .. short_name .. "' from '" .. active_group.name .. "' (still in: " .. table.concat(group_names, ", ") .. ")", vim.log.levels.INFO)
+                vim.notify("Removed '" .. short_name .. "' from '" .. format_group_label(active_group) .. "' (still in: " .. table.concat(group_names, ", ") .. ")", vim.log.levels.INFO)
             else
-                vim.notify("Removed '" .. short_name .. "' from '" .. active_group.name .. "' (removed from all groups)", vim.log.levels.INFO)
+                vim.notify("Removed '" .. short_name .. "' from '" .. format_group_label(active_group) .. "' (removed from all groups)", vim.log.levels.INFO)
             end
 
             -- Refresh interface
@@ -850,7 +870,7 @@ function M.setup()
             end
         end
 
-        vim.notify("Added " .. added_count .. " buffers to group '" .. active_group.name .. "'", vim.log.levels.INFO)
+        vim.notify("Added " .. added_count .. " buffers to group '" .. format_group_label(active_group) .. "'", vim.log.levels.INFO)
 
         -- Refresh interface
         vim.schedule(function()
