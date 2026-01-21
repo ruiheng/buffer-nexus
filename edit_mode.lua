@@ -837,18 +837,22 @@ local function execute_move(move, buffer_maps, cwd)
         end
     end
 
-    -- Rename the file on disk
-    local ok, err = vim.loop.fs_rename(old_real, new_abs)
-    if not ok then
-        return false, "file system rename failed: " .. tostring(err)
+    -- Use :saveas to save buffer to new location
+    -- This properly updates all buffer internal state
+    local success, buf_err = pcall(api.nvim_buf_call, buf_id, function()
+        vim.cmd("saveas " .. vim.fn.fnameescape(new_abs))
+    end)
+
+    if not success then
+        return false, "saveas failed: " .. tostring(buf_err)
     end
 
-    -- Update buffer name to new path
-    local success, buf_err = pcall(api.nvim_buf_set_name, buf_id, new_abs)
-    if not success then
-        -- Buffer name update failed, try to recover by reverting file move
-        vim.loop.fs_rename(new_abs, old_real)
-        return false, "buffer name update failed, reverted file move: " .. tostring(buf_err)
+    -- Delete the old file (saveas already created the new one)
+    local del_ok, del_err = vim.loop.fs_unlink(old_real)
+    if not del_ok then
+        -- Old file couldn't be deleted, but the move partially succeeded
+        -- Log this but don't fail the operation
+        vim.notify(string.format("Warning: old file not deleted: %s", del_err), vim.log.levels.WARN)
     end
 
     -- Update buffer mappings

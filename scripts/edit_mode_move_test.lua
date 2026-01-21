@@ -124,6 +124,20 @@ local moved_bufnr = vim.fn.bufnr(moved_file, false)
 assert_ok(moved_bufnr > 0, "buffer should exist for moved file")
 assert_ok(moved_bufnr == subdir_buf, "same buffer should be used after move")
 
+-- Test 2.5: Verify we can modify and save after move
+vim.api.nvim_buf_set_lines(moved_bufnr, 0, -1, false, { "new content after move" })
+local write_ok = pcall(vim.api.nvim_buf_call, moved_bufnr, function()
+    vim.cmd("write")
+end)
+assert_ok(write_ok, "should be able to save file after move")
+
+-- Verify content was written
+local moved_file_content = {}
+for line in io.lines(moved_file) do
+    table.insert(moved_file_content, line)
+end
+assert_ok(moved_file_content[1] == "new content after move", "saved content should match")
+
 -- Test 3: Error - moving modified buffer should fail
 create_file(old_file, "modified test")
 local modified_buf = vim.fn.bufnr(old_file, true)
