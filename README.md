@@ -57,7 +57,7 @@ require('bufferline').setup({
 - **Smart filename disambiguation** - automatically resolves duplicate filenames with minimal path context
 - **Cursor alignment** - BN content automatically aligns with your cursor position in the main window
 - **Pinned buffers** - show in a global pinned section (syncs with bufferline when installed); standalone can assign stable pick chars via edit mode
-- **Edit mode (modal)** - batch edit groups in a temporary buffer and apply
+- **Edit mode (modal)** - batch edit groups in a temporary buffer and apply; supports file move/rename with `old -> new` syntax
 
 ### Group Management
 - **Automatic buffer addition** - new buffers auto-join the active group
@@ -121,6 +121,34 @@ Note: `BufferLineGoToBuffer` and `BufferLinePick` are provided by bufferline.nvi
 - Great for large refactors: move buffers across groups, duplicate entries into multiple groups, and assign stable pick chars with `[pin]` / `[pin=a]`.
 - Safe and forgiving: unsaved buffers are preserved, and invalid lines are skipped with warnings instead of aborting.
 - Built-in file insertion: use the edit picker (Telescope/snacks/fzf-lua/mini.pick) to add files quickly.
+
+**Edit Mode Syntax:**
+```
+# Group headers
+[Group] GroupName
+
+# Regular file paths
+README.md
+docs/guide.md
+
+# Pinned buffers with stable pick chars
+src/main.lua [pin=a]
+config.json [pin]
+
+# Create new file buffers (file not yet on disk)
+notes/idea.md [new]
+
+# Move/rename files on disk
+old_file.lua -> new_file.lua
+docs/old.md -> lib/new.md
+```
+
+**File Move/Rename:**
+- Use `old_path -> new_path` syntax to move or rename files
+- Files are moved on disk when you save (`:w`)
+- Buffer automatically updates to the new path
+- Cannot move modified buffers (save first)
+- Target directories are created automatically if needed
 
 ### Group Operations
 - `:BNCreateGroup [name]` - Create new group with optional name

@@ -210,7 +210,8 @@ local function build_edit_lines()
         "# docs/guide.md [pin]  # Pin buffer",
         "# /home/user/projects/app/src/main.lua [pin=a]  # Absolute path with stable pick char",
         "# notes/new_file.md [new]  # Create buffer for a missing file",
-        "",
+        "# old_file.lua -> new_file.lua  # Move/rename file on disk",
+        "#",
         "# <C-p>: use file picker to insert files. picker = " .. picker_name,
         "# zc,zo... to control code folding",
         "# :w or :wq to apply, :q! to discard",
@@ -697,37 +698,168 @@ local function parse_flags(raw, warnings, line_number)
     return path, flags
 end
 
+local function parse_move_line(line, line_number)
+    local old_path, new_path = line:match("^(.-)%s+%->%s+(.-)$")
+    if not old_path or not new_path then
+        return nil
+    end
+    old_path = vim.trim(old_path)
+    new_path = vim.trim(new_path)
+    if old_path == "" or new_path == "" then
+        return nil
+    end
+    return { old = old_path, new = new_path, line = line_number }
+end
+
 local function parse_lines(lines)
     local group_specs = {}
     local warnings = {}
+    local moves = {}
     local current = nil
+    local current_group_idx = 0
 
     for i, line in ipairs(lines) do
         local trimmed, is_comment = strip_comment(line)
-        if is_comment or trimmed == "" then
-            goto continue
-        end
-
-        local group_name = trimmed:match("^%[Group%]%s*(.*)$")
-        if group_name ~= nil then
-            local name = vim.trim(group_name)
-            if group_name ~= "" and group_name ~= name then
-                table.insert(warnings, string.format("Line %d: group name trimmed to '%s'", i, name))
+        if not (is_comment or trimmed == "") then
+            -- Check for move syntax first (before group header check)
+            local move = parse_move_line(trimmed, i)
+            if not move then
+                local group_name = trimmed:match("^%[Group%]%s*(.*)$")
+                if group_name ~= nil then
+                    local name = vim.trim(group_name)
+                    if group_name ~= "" and group_name ~= name then
+                        table.insert(warnings, string.format("Line %d: group name trimmed to '%s'", i, name))
+                    end
+                    current = { name = name, entries = {}, line = i }
+                    table.insert(group_specs, current)
+                    current_group_idx = #group_specs
+                else
+                    if current then
+                        table.insert(current.entries, { raw = trimmed, line = i })
+                    else
+                        table.insert(warnings, string.format("Line %d: buffer entry outside any group", i))
+                    end
+                end
+            else
+                move.group_idx = current_group_idx
+                table.insert(moves, move)
             end
-            current = { name = name, entries = {}, line = i }
-            table.insert(group_specs, current)
-        else
-            if not current then
-                table.insert(warnings, string.format("Line %d: buffer entry outside any group", i))
-                goto continue
-            end
-            table.insert(current.entries, { raw = trimmed, line = i })
         end
-
-        ::continue::
     end
 
-    return group_specs, warnings
+    return group_specs, warnings, moves
+end
+
+--- Validate a move operation
+--- @param move table Move operation with old, new, line fields
+--- @param buffer_maps table Buffer path mappings
+--- @param cwd string Current working directory
+--- @return boolean valid, string|nil error_message
+local function validate_move(move, buffer_maps, cwd)
+    local old_real, old_abs = normalize_path(move.old, cwd)
+    local new_real, new_abs = normalize_path(move.new, cwd)
+
+    -- Check if old path exists
+    if not old_real then
+        return false, string.format("Line %d: source path does not exist: %s", move.line, move.old)
+    end
+
+    -- Check if old path is a file (not directory)
+    local old_stat = vim.loop.fs_stat(old_real)
+    if not old_stat then
+        return false, string.format("Line %d: source file not found: %s", move.line, move.old)
+    end
+    if old_stat.type ~= "file" then
+        return false, string.format("Line %d: source is not a file: %s", move.line, move.old)
+    end
+
+    -- Find buffer for old path
+    local buf_id = buffer_maps.real[old_real] or buffer_maps.abs[old_abs] or buffer_maps.raw[move.old]
+    if not buf_id or not api.nvim_buf_is_valid(buf_id) then
+        return false, string.format("Line %d: no buffer found for: %s", move.line, move.old)
+    end
+
+    -- Check if buffer is modified
+    if is_modified_buffer(buf_id) then
+        return false, string.format("Line %d: cannot move modified buffer (save first): %s", move.line, move.old)
+    end
+
+    -- Check if new path already exists
+    if new_real then
+        local new_stat = vim.loop.fs_stat(new_real)
+        if new_stat then
+            return false, string.format("Line %d: target already exists: %s", move.line, move.new)
+        end
+    end
+
+    -- Check if target directory exists, if not, we'll create it
+    if new_abs then
+        local target_dir = vim.fn.fnamemodify(new_abs, ":h")
+        local dir_stat = vim.loop.fs_stat(target_dir)
+        if not dir_stat then
+            -- Target directory doesn't exist, we'll create it
+        elseif dir_stat.type ~= "directory" then
+            return false, string.format("Line %d: target parent is not a directory: %s", move.line, move.new)
+        end
+    end
+
+    return true
+end
+
+--- Execute a file move operation
+--- @param move table Move operation
+--- @param buffer_maps table Buffer path mappings
+--- @param cwd string Current working directory
+--- @return boolean success, string|nil error_message
+local function execute_move(move, buffer_maps, cwd)
+    local old_real, old_abs = normalize_path(move.old, cwd)
+    local new_real, new_abs = normalize_path(move.new, cwd)
+
+    if not old_real or not new_abs then
+        return false, "path resolution failed"
+    end
+
+    -- Find buffer for old path
+    local buf_id = buffer_maps.real[old_real] or buffer_maps.abs[old_abs] or buffer_maps.raw[move.old]
+    if not buf_id then
+        return false, "buffer not found"
+    end
+
+    -- Create target directory if needed
+    local target_dir = vim.fn.fnamemodify(new_abs, ":h")
+    if target_dir ~= "." then
+        local dir_stat = vim.loop.fs_stat(target_dir)
+        if not dir_stat then
+            local ok, err = vim.fn.mkdir(target_dir, "p")
+            if not ok then
+                return false, "failed to create target directory: " .. tostring(err)
+            end
+        end
+    end
+
+    -- Rename the file on disk
+    local ok, err = vim.loop.fs_rename(old_real, new_abs)
+    if not ok then
+        return false, "file system rename failed: " .. tostring(err)
+    end
+
+    -- Update buffer name to new path
+    local success, buf_err = pcall(api.nvim_buf_set_name, buf_id, new_abs)
+    if not success then
+        -- Buffer name update failed, try to recover by reverting file move
+        vim.loop.fs_rename(new_abs, old_real)
+        return false, "buffer name update failed, reverted file move: " .. tostring(buf_err)
+    end
+
+    -- Update buffer mappings
+    buffer_maps.real[new_abs] = buf_id
+    buffer_maps.abs[new_abs] = buf_id
+    buffer_maps.raw[new_abs] = buf_id
+    buffer_maps.real[old_real] = nil
+    buffer_maps.abs[old_abs] = nil
+    buffer_maps.raw[move.old] = nil
+
+    return true
 end
 
 local function resolve_entry(path, flags, buffer_maps, cwd, warnings, line_number)
@@ -797,37 +929,34 @@ local function build_group_buffers(group_specs)
 
         for _, entry in ipairs(spec.entries or {}) do
             local path, flags = parse_flags(entry.raw, warnings, entry.line)
-            if path == "" then
-                table.insert(warnings, string.format("Line %d: empty buffer entry", entry.line))
-                goto continue
-            end
-
-            local buf_id = resolve_entry(path, flags, buffer_maps, cwd, warnings, entry.line)
-            if buf_id then
-                if seen[buf_id] then
-                    table.insert(warnings, string.format("Line %d: duplicate buffer in group '%s'", entry.line, spec.name))
-                else
-                    table.insert(buffers, buf_id)
-                    seen[buf_id] = true
-                end
-                if flags.pin then
-                    pin_set[buf_id] = true
-                    if flags.pin_char then
-                        if used_pin_chars[flags.pin_char] and used_pin_chars[flags.pin_char] ~= buf_id then
-                            table.insert(warnings, string.format(
-                                "Line %d: pin character '%s' already used; ignored",
-                                entry.line,
-                                flags.pin_char
-                            ))
-                        else
-                            pin_chars[buf_id] = flags.pin_char
-                            used_pin_chars[flags.pin_char] = buf_id
+            if not (path == "") then
+                local buf_id = resolve_entry(path, flags, buffer_maps, cwd, warnings, entry.line)
+                if buf_id then
+                    if seen[buf_id] then
+                        table.insert(warnings, string.format("Line %d: duplicate buffer in group '%s'", entry.line, spec.name))
+                    else
+                        table.insert(buffers, buf_id)
+                        seen[buf_id] = true
+                    end
+                    if flags.pin then
+                        pin_set[buf_id] = true
+                        if flags.pin_char then
+                            if used_pin_chars[flags.pin_char] and used_pin_chars[flags.pin_char] ~= buf_id then
+                                table.insert(warnings, string.format(
+                                    "Line %d: pin character '%s' already used; ignored",
+                                    entry.line,
+                                    flags.pin_char
+                                ))
+                            else
+                                pin_chars[buf_id] = flags.pin_char
+                                used_pin_chars[flags.pin_char] = buf_id
+                            end
                         end
                     end
                 end
+            else
+                table.insert(warnings, string.format("Line %d: empty buffer entry", entry.line))
             end
-
-            ::continue::
         end
 
         table.insert(results, { name = spec.name, buffers = buffers })
@@ -850,18 +979,15 @@ local function enforce_modified_buffers(group_specs, warnings)
 
     for _, buf_id in ipairs(api.nvim_list_bufs()) do
         if api.nvim_buf_is_valid(buf_id) and is_modified_buffer(buf_id) and not present[buf_id] then
-            if buf_id == edit_state.buf_id then
-                goto continue
+            if not (buf_id == edit_state.buf_id) then
+                local ft = api.nvim_get_option_value("filetype", { buf = buf_id })
+                if not (ft == "buffer-nexus-edit") then
+                    table.insert(group_specs[1].buffers, buf_id)
+                    present[buf_id] = true
+                    table.insert(warnings, string.format("Buffer %d is modified and was not listed; added to first group", buf_id))
+                end
             end
-            local ft = api.nvim_get_option_value("filetype", { buf = buf_id })
-            if ft == "buffer-nexus-edit" then
-                goto continue
-            end
-            table.insert(group_specs[1].buffers, buf_id)
-            present[buf_id] = true
-            table.insert(warnings, string.format("Buffer %d is modified and was not listed; added to first group", buf_id))
         end
-        ::continue::
     end
 end
 
@@ -872,7 +998,46 @@ local function notify_warnings(warnings)
 end
 
 local function apply_edit_lines(lines, context)
-    local group_specs, warnings = parse_lines(lines or {})
+    local group_specs, warnings, moves = parse_lines(lines or {})
+
+    -- Process move operations first (before parsing buffers)
+    if #moves > 0 then
+        local buffer_maps = build_buffer_maps()
+        local cwd = vim.fn.getcwd()
+
+        -- Validate all moves first
+        local valid_moves = {}
+        for _, move in ipairs(moves) do
+            local valid, err = validate_move(move, buffer_maps, cwd)
+            if valid then
+                table.insert(valid_moves, move)
+            else
+                table.insert(warnings, err)
+            end
+        end
+
+        -- Execute valid moves and add target paths back to group_specs
+        for _, move in ipairs(valid_moves) do
+            local success, err = execute_move(move, buffer_maps, cwd)
+            if success then
+                -- Add target path back to group as a normal entry
+                local group_idx = move.group_idx or 1
+                if group_idx >= 1 and group_idx <= #group_specs then
+                    table.insert(group_specs[group_idx].entries, {
+                        raw = move.new,
+                        line = move.line
+                    })
+                end
+            else
+                table.insert(warnings, string.format("Line %d: move failed: %s", move.line, err))
+            end
+        end
+
+        -- Rebuild buffer maps after moves
+        if #valid_moves > 0 then
+            buffer_maps = build_buffer_maps()
+        end
+    end
 
     if #group_specs == 0 then
         table.insert(warnings, "No groups found; created an unnamed group")
