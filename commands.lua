@@ -780,16 +780,12 @@ function M.setup()
         desc = "Add current buffer to current group (allows multi-group)"
     })
 
-    -- Smart close buffer (similar to scope.nvim)
-    vim.api.nvim_create_user_command("BNSmartClose", function()
-        local bufferline_integration = require('buffer-nexus.bufferline-integration')
-        bufferline_integration.smart_close_buffer()
-    end, {
-        nargs = 0,
-        desc = "Smart close buffer: remove from group if exists elsewhere, delete globally otherwise"
-    })
-
     -- Remove buffer from current group (soft delete)
+    -- Note: This command is rarely used directly. Most users prefer:
+    -- - Sidebar 'x' key for removing from group
+    -- - Sidebar 'd' key for smart deletion
+    -- - :BNPickClose for cross-group pick-and-delete
+    -- However, we keep this command for programmatic use and backward compatibility.
     vim.api.nvim_create_user_command("BNRemoveFromGroup", function()
         local groups = require('buffer-nexus.groups')
         local active_group = groups.get_active_group()
@@ -827,6 +823,50 @@ function M.setup()
     end, {
         nargs = 0,
         desc = "Remove current buffer from current group only (soft delete)"
+    })
+
+    -- Delete buffer completely (remove from all groups and delete from Vim)
+    vim.api.nvim_create_user_command("BNDeleteBuffer", function()
+        local groups = require('buffer-nexus.groups')
+        local current_buffer = vim.api.nvim_get_current_buf()
+        local buffer_name = vim.api.nvim_buf_get_name(current_buffer)
+        local short_name = buffer_name ~= "" and vim.fn.fnamemodify(buffer_name, ":t") or "[No Name]"
+
+        -- Find which groups contain this buffer before deletion
+        local affected_groups = groups.find_buffer_groups(current_buffer)
+        local group_names = {}
+        for _, group in ipairs(affected_groups) do
+            table.insert(group_names, format_group_label(group))
+        end
+
+        -- Remove from all groups first
+        groups.remove_buffer_from_all_groups(current_buffer)
+
+        -- Try to delete the buffer
+        local ok, err = pcall(vim.cmd, "bdelete " .. current_buffer)
+
+        if ok then
+            -- Show what was removed
+            if #affected_groups > 0 then
+                vim.notify("Deleted '" .. short_name .. "' (removed from: " .. table.concat(group_names, ", ") .. ")", vim.log.levels.INFO)
+            else
+                vim.notify("Deleted '" .. short_name .. "'", vim.log.levels.INFO)
+            end
+
+            -- Refresh interface
+            vim.schedule(function()
+                local vbl = require('buffer-nexus')
+                if vbl.state and vbl.state.is_sidebar_open then
+                    vbl.refresh()
+                end
+            end)
+        else
+            -- If bdelete failed (e.g., unsaved changes), notify user
+            vim.notify("Failed to delete buffer: " .. (err or "unknown error"), vim.log.levels.ERROR)
+        end
+    end, {
+        nargs = 0,
+        desc = "Delete current buffer completely (remove from all groups and delete from Vim)"
     })
 
     -- Keep only current buffer in group (remove others from group)

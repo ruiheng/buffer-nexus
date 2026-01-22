@@ -333,6 +333,16 @@ Navigation:
 :BNPickClose                 Pick a buffer across groups and close it
 :BNPickGroup                 Pick a buffer in the current group with a picker
 
+Buffer Management:                              *buffer-nexus-buffer-commands*
+:BNDeleteBuffer              Delete current buffer completely (remove from all
+                             groups and delete from Vim)
+:BNRemoveFromGroup           Remove current buffer from current group only
+                             (keeps buffer in Vim and other groups)
+
+Sidebar shortcuts:
+  d / D                      Smart close buffer (group-aware deletion)
+  x                          Remove buffer from current group
+
 Group Reordering:
 :BNMoveGroupUp               Move current group up in the list
 :BNMoveGroupDown             Move current group down in the list

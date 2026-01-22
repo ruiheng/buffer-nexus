@@ -167,6 +167,11 @@ docs/old.md -> lib/new.md
 - `:BNPick` - Pick a buffer across groups
 - `:BNPickClose` - Pick a buffer across groups and close it
 
+### Buffer Management
+- `:BNDeleteBuffer` - Delete current buffer completely (remove from all groups and delete from Vim)
+- `:BNRemoveFromGroup` - Remove current buffer from current group only (keeps buffer in Vim and other groups)
+- Sidebar shortcuts: `d`/`D` for smart close, `x` for remove from group
+
 ### Group Reordering
 - `:BNMoveGroupUp` - Move current group up in the list
 - `:BNMoveGroupDown` - Move current group down in the list
