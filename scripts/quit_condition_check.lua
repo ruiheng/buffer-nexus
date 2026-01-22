@@ -74,6 +74,7 @@ local function ensure_normal_window(state)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 local state = require('buffer-nexus.state')
@@ -163,4 +164,10 @@ end)
 assert_ok(quit_called, "should quit when only horizontal sidebar/placeholder remain")
 
 print("OK: quit condition check")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

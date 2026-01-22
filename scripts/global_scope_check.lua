@@ -18,6 +18,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -46,4 +47,10 @@ assert_ok(active ~= nil, "active group should exist")
 assert_ok(#active.buffers >= 2, "global group should include buffers from both windows")
 
 print("OK: global scope behavior")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

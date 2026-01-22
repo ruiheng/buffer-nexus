@@ -40,6 +40,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 setup_temp_cache()
 enable_winbar()
 vim.o.shadafile = vim.fn.tempname()
@@ -228,4 +229,10 @@ if not ok then
     vim.cmd("qa!")
 end
 
-vim.cmd("qa!")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

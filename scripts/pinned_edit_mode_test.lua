@@ -11,6 +11,7 @@ local function add_rtp_root()
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 vim.o.shadafile = vim.fn.tempname()
 vim.o.swapfile = false
 
@@ -51,4 +52,10 @@ assert_eq(state.is_buffer_pinned(buf3), false, "buf3 should not be pinned")
 assert_eq(state.get_buffer_pin_char(buf3), nil, "buf3 pin char should be nil")
 
 print("pinned edit-mode test: ok")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

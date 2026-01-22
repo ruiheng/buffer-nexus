@@ -11,6 +11,7 @@ local function add_rtp_root()
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 vim.o.shadafile = vim.fn.tempname()
 vim.o.swapfile = false
 
@@ -112,4 +113,10 @@ end
 vbl.close_sidebar()
 
 print("pick input visual feedback test: ok")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

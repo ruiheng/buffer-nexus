@@ -36,6 +36,7 @@ local function assert_name_counts(expected, actual)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -90,4 +91,10 @@ assert_ok(buffer_in_group(buf1, "Alpha"), "buf1 should be in Alpha after load")
 assert_ok(buffer_in_group(buf2, "Beta"), "buf2 should be in Beta after load")
 
 print("OK: groups file round trip")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

@@ -18,6 +18,7 @@ local function ensure_missing(path)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -77,4 +78,10 @@ assert_ok(group_has_path(new_group, new_path), "expected [new] file to be added 
 assert_ok(vim.fn.bufnr(new_path, false) > 0, "expected [new] file to create a buffer")
 
 print("OK: edit-mode [new] flag")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

@@ -33,6 +33,7 @@ local function find_group_by_name(groups_list, name)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -68,4 +69,10 @@ assert_ok(groups.delete_group(g1), "should delete Alpha")
 assert_ok(find_group_by_name(groups.get_all_groups(), "Alpha") == nil, "Alpha group should be deleted")
 
 print("OK: group operations check")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

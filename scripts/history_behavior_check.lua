@@ -24,6 +24,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -68,4 +69,10 @@ config.settings.show_history = "auto"
 assert_ok(groups.should_show_history(active.id), "show_history=auto should show when threshold met")
 
 print("OK: history behavior check")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

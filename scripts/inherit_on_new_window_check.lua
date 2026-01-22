@@ -27,6 +27,7 @@ local function find_group_by_name(groups_list, name)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -63,4 +64,10 @@ local groups_win2 = groups.get_all_groups()
 assert_ok(find_group_by_name(groups_win2, "Alpha"), "new window should inherit Alpha group")
 
 print("OK: inherit_on_new_window behavior")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

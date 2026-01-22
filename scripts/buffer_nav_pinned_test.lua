@@ -11,6 +11,7 @@ local function add_rtp_root()
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 vim.o.shadafile = vim.fn.tempname()
 vim.o.swapfile = false
 
@@ -53,4 +54,10 @@ vbl.switch_to_prev_buffer()
 assert_eq(vim.api.nvim_get_current_buf(), buf3, "prev buffer should wrap skipping pinned")
 
 print("buffer nav pinned test: ok")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

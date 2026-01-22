@@ -18,6 +18,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -66,4 +67,10 @@ assert_ok(alpha ~= nil, "expected Alpha group to be created")
 assert_ok(group_has_path(alpha, abs_path), "expected unopened file to be added to Alpha")
 
 print("OK: edit-mode unopened file")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

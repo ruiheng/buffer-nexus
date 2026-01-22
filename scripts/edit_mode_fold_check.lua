@@ -12,6 +12,7 @@ local function add_rtp_root()
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -31,4 +32,10 @@ end)
 assert_ok(ok, "foldexpr errored: " .. tostring(result))
 
 print("OK: edit-mode foldexpr works")
-vim.cmd("qa!")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

@@ -18,6 +18,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -100,4 +101,17 @@ assert_ok(active_after_win2 and contains(active_after_win2.buffers, buf2), "win2
 assert_ok(contains(active_after_win2.buffers, buf1), "win2 active group missing buf1 after refresh")
 
 print("OK: window-scoped groups are isolated and sidebar refresh stays in main window context")
-vim.cmd("qa")
+
+-- Close sidebar explicitly to avoid cleanup hangs
+local state = require('buffer-nexus.state')
+if state.get_win_id() then
+    vbl.toggle()
+end
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

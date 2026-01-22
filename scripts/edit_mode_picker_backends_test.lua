@@ -18,6 +18,7 @@ local function add_dep_rtp(path)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 add_dep_rtp(vim.fn.getcwd() .. "/.deps/snacks.nvim")
 add_dep_rtp(vim.fn.getcwd() .. "/.deps/fzf-lua")
 
@@ -65,4 +66,10 @@ open_and_assert_header("snacks")
 open_and_assert_header("fzf-lua")
 
 print("OK: edit-mode picker backends")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

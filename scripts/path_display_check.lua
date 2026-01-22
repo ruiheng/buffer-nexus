@@ -20,6 +20,7 @@ local function write_file(path, lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local filename_utils = require('buffer-nexus.filename_utils')
 
@@ -46,4 +47,10 @@ local compressed = filename_utils.compress_path_smart(long_path, 20, 1)
 assert_ok(#compressed <= 20, "compressed path should respect max width")
 
 print("OK: path display helpers")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

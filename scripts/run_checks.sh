@@ -1,19 +1,10 @@
 #!/usr/bin/env sh
-set -eu
+set -e
 
 run_check() {
     printf "Running %s...\n" "$1"
-    if command -v timeout >/dev/null 2>&1; then
-        if ! timeout "${BN_CHECK_TIMEOUT:-60s}" nvim --headless -u NONE -i NONE -n "+lua dofile('$1')"; then
-            status=$?
-            if [ "$status" -eq 124 ]; then
-                printf "Timeout running %s (set BN_CHECK_TIMEOUT to adjust)\n" "$1" >&2
-            fi
-            exit "$status"
-        fi
-    else
-        nvim --headless -u NONE -i NONE -n "+lua dofile('$1')"
-    fi
+    local test_path="$1"
+    timeout "${BN_CHECK_TIMEOUT:-60s}" nvim --headless -u NONE -i NONE -n "+lua dofile('${test_path}')" 2>&1
     printf "\n"
 }
 

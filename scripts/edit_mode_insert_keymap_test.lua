@@ -18,6 +18,7 @@ local function add_dep_rtp(path)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 add_dep_rtp(vim.fn.getcwd() .. "/.deps/telescope.nvim")
 add_dep_rtp(vim.fn.getcwd() .. "/.deps/mini.nvim")
 
@@ -57,4 +58,10 @@ ok, mode = find_mapping(buf_id)
 assert_ok(ok, "expected <C-p> mapping in edit buffer after re-open")
 
 print("OK: edit-mode insert keymap")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

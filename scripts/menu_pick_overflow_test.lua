@@ -11,6 +11,7 @@ local function add_rtp_root()
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 vim.o.shadafile = vim.fn.tempname()
 vim.o.swapfile = false
 
@@ -107,4 +108,10 @@ assert_ok(unique_count == #items, "menu hints should be unique")
 assert_ok(menu_has_multi, "menu should include multi-char hints")
 
 print("menu pick overflow test: ok")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

@@ -88,6 +88,7 @@ local function assert_horizontal_no_extra_space(sidebar_win, enforce_height)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require("buffer-nexus")
 local config = require("buffer-nexus.config")
@@ -160,4 +161,10 @@ if not ok then
 end
 
 print("OK: cmdheight and window sizes are stable when switching left -> top")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

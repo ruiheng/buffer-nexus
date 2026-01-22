@@ -10,6 +10,7 @@ local function add_rtp_root()
     vim.opt.rtp:append(rtp_root)
 end
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 local config = require('buffer-nexus.config')
@@ -95,4 +96,10 @@ components.get_git_status = original_get_git
 components.get_lsp_status = original_get_lsp
 
 print("menu details toggle test: ok")
-vim.cmd("qa!")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

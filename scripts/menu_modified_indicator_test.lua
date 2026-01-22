@@ -17,6 +17,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 vim.o.shadafile = vim.fn.tempname()
 vim.o.swapfile = false
 
@@ -48,4 +49,10 @@ end
 assert_ok(has_modified, "menu should show modified indicator")
 
 print("menu modified indicator test: ok")
-vim.cmd("qa!")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

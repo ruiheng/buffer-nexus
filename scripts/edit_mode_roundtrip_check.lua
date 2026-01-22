@@ -18,6 +18,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -68,4 +69,10 @@ assert_ok(#(after_map["Alpha"].buffers or {}) >= 1, "Alpha should keep buffers a
 assert_ok(#(after_map["Beta"].buffers or {}) >= 1, "Beta should keep buffers after round trip")
 
 print("OK: edit-mode round trip")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

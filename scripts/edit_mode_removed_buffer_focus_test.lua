@@ -18,6 +18,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -53,4 +54,10 @@ end, 20)
 assert_ok(vim.api.nvim_get_current_buf() == buf2, "expected focus to switch to remaining buffer")
 
 print("OK: edit-mode focus after removal")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

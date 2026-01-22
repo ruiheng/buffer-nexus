@@ -18,6 +18,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -70,4 +71,10 @@ assert_ok(active_group and active_group.id == group_id, "active group should be 
 assert_ok(not vim.tbl_contains(active_group.buffers, initial_buf), "initial buffer should not be added to new group")
 
 print("OK: picker group switch no focus check")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

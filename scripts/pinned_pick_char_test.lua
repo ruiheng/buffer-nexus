@@ -11,6 +11,7 @@ local function add_rtp_root()
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 vim.o.shadafile = vim.fn.tempname()
 vim.o.swapfile = false
 
@@ -52,4 +53,10 @@ assert_eq(hint_lines["a"], buf1, "pinned pick char should map to pinned buffer")
 vbl.close_sidebar()
 
 print("pinned pick char test: ok")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

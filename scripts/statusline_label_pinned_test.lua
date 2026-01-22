@@ -11,6 +11,7 @@ local function add_rtp_root()
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 vim.o.shadafile = vim.fn.tempname()
 vim.o.swapfile = false
 
@@ -51,4 +52,10 @@ vim.api.nvim_set_current_buf(buf1)
 assert_eq(vbl.statusline_label(), "[1]", "pinned current buffer should omit position")
 
 print("statusline label pinned test: ok")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

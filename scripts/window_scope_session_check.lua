@@ -36,6 +36,7 @@ local function contains(tbl, val)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -89,4 +90,17 @@ assert_ok(contains(beta_group.buffers, buf2), "win2 Beta group missing buf2 afte
 assert_ok(not find_group_by_name(groups_win2, "Alpha"), "win2 unexpectedly has Alpha group")
 
 print("OK: window-scoped session save/restore works")
-vim.cmd("qa")
+
+-- Close windows explicitly to avoid cleanup hangs
+pcall(function()
+    vim.api.nvim_win_close(win2, true)
+    vim.api.nvim_win_close(win1, true)
+end)
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

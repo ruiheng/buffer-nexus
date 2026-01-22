@@ -27,6 +27,7 @@ local function contains(tbl, val)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -64,4 +65,10 @@ local history_after = groups.get_group_history(active_after.id)
 assert_ok(not contains(history_after, buf2), "deleted buffer should be removed from history")
 
 print("OK: buffer cleanup behavior")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

@@ -11,6 +11,7 @@ local function add_rtp_root()
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 vim.o.shadafile = vim.fn.tempname()
 vim.o.swapfile = false
 
@@ -67,4 +68,10 @@ assert_eq(state.is_buffer_pinned(restored_buf2), true, "buf2 should be pinned af
 assert_eq(state.get_buffer_pin_char(restored_buf2), nil, "buf2 pin char should be nil after restore")
 
 print("pinned session test: ok")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

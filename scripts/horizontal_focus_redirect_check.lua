@@ -18,6 +18,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -45,4 +46,10 @@ end)
 assert_ok(vim.api.nvim_get_current_win() ~= placeholder_win_id, "focus should redirect away from placeholder")
 
 print("OK: horizontal focus redirect check")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

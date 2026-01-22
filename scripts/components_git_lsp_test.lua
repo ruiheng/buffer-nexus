@@ -11,6 +11,7 @@ local function add_rtp_root()
     vim.opt.rtp:append(rtp_root)
 end
 add_rtp_root()
+local ok, err = pcall(function()
 
 local components = require("buffer-nexus.components")
 local renderer = require("buffer-nexus.renderer")
@@ -67,4 +68,10 @@ local function run_test()
 end
 
 run_test()
-vim.cmd("qa!")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

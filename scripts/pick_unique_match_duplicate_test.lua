@@ -11,6 +11,7 @@ local function add_rtp_root()
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 vim.o.shadafile = vim.fn.tempname()
 vim.o.swapfile = false
 
@@ -34,4 +35,10 @@ assert_ok(match_count == 1, "expected unique buffer match count for duplicate li
 assert_ok(match_hint ~= nil, "expected a matching hint")
 
 print("pick unique match duplicate test: ok")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

@@ -26,6 +26,7 @@ local function create_file(path, content)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -198,4 +199,10 @@ for _, buf in ipairs(vim.api.nvim_list_bufs()) do
         vim.api.nvim_buf_set_option(buf, "modified", false)
     end
 end
-vim.cmd("qa!")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end

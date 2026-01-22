@@ -18,6 +18,7 @@ local function write_temp_file(lines)
 end
 
 add_rtp_root()
+local ok, err = pcall(function()
 
 local vbl = require('buffer-nexus')
 vbl.setup({
@@ -55,4 +56,10 @@ assert_ok(vim.tbl_contains(active_group.buffers, current_buf), "current buffer s
 assert_ok(#active_group.buffers == 1, "empty group should get a single new buffer")
 
 print("OK: empty group switch check")
-vim.cmd("qa")
+end)
+if ok then
+    -- Use qa! to force quit without saving, avoiding hangs from window cleanup
+    vim.cmd("qa!")
+else
+    vim.cmd("cq!")
+end
