@@ -916,8 +916,8 @@ local function close_buffer_from_group(buffer_id, group_id)
 
     -- Check if buffer exists in other groups
     local all_groups_with_buffer = groups.find_buffer_groups(buffer_id)
-    if #all_groups_with_buffer <= 1 then
-        -- This was the only group with this buffer, safely close it
+    if #all_groups_with_buffer == 0 then
+        -- Buffer is no longer in any group, safely close it
         bufferline_integration.smart_close_buffer(buffer_id)
     end
 
@@ -951,10 +951,68 @@ local function handle_extended_picking_key(key)
         return false
     end
 
-    -- Look up buffer_id from hint_lines (letter -> buffer_id mapping)
-    local buffer_id = extended_picking.hint_lines[key]
+    local line_to_buffer = state_module.get_line_to_buffer_id()
+    local line_group_context = state_module.get_line_group_context()
+    local line_hints = extended_picking.line_hints or {}
+    local hint_lines = extended_picking.hint_lines or {}
+    local hint_line = nil
+    local buffer_id = nil
+
+    if next(line_hints) ~= nil then
+        hint_line = hint_lines[key]
+        if hint_line and line_to_buffer then
+            buffer_id = line_to_buffer[hint_line]
+        end
+    else
+        buffer_id = hint_lines[key]
+    end
+
     if not buffer_id or not api.nvim_buf_is_valid(buffer_id) then
         return false
+    end
+
+    local candidate_lines = {}
+    if line_to_buffer then
+        for line_num, buf_id in pairs(line_to_buffer) do
+            if buf_id == buffer_id then
+                table.insert(candidate_lines, line_num)
+            end
+        end
+    end
+    table.sort(candidate_lines)
+
+    local function pick_line_for_buffer()
+        local sidebar_win = state_module.get_win_id()
+        if sidebar_win and api.nvim_win_is_valid(sidebar_win) then
+            local cursor_line = api.nvim_win_get_cursor(sidebar_win)[1]
+            if line_to_buffer and line_to_buffer[cursor_line] == buffer_id then
+                return cursor_line
+            end
+        end
+
+        local active_group = groups.get_active_group()
+        if active_group and line_group_context then
+            for _, line_num in ipairs(candidate_lines) do
+                if line_group_context[line_num] == active_group.id then
+                    return line_num
+                end
+            end
+        end
+
+        if hint_line then
+            return hint_line
+        end
+
+        return candidate_lines[1]
+    end
+
+    local target_line = pick_line_for_buffer()
+    local target_group_id = nil
+    if target_line and line_group_context then
+        local group_id = line_group_context[target_line]
+        if group_id and group_id ~= "pinned" then
+            target_group_id = group_id
+        end
     end
 
     if is_buffer_pinned(buffer_id) then
@@ -969,12 +1027,21 @@ local function handle_extended_picking_key(key)
         return false
     end
 
-    -- Find which group this buffer belongs to
-    local target_group_id = nil
-    for _, group in ipairs(groups.get_all_groups()) do
-        if vim.tbl_contains(group.buffers or {}, buffer_id) then
-            target_group_id = group.id
-            break
+    if not target_group_id then
+        local buffer_groups = groups.find_buffer_groups(buffer_id)
+        if #buffer_groups > 0 then
+            local active_group = groups.get_active_group()
+            if active_group then
+                for _, group in ipairs(buffer_groups) do
+                    if group.id == active_group.id then
+                        target_group_id = group.id
+                        break
+                    end
+                end
+            end
+            if not target_group_id then
+                target_group_id = buffer_groups[1].id
+            end
         end
     end
 
@@ -991,6 +1058,8 @@ local function handle_extended_picking_key(key)
 
     return true
 end
+
+M._handle_extended_picking_key_for_test = handle_extended_picking_key
 
 -- Pick highlights matching bufferline's style
 -- Copy the exact colors from BufferLine groups
