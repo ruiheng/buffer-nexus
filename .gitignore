@@ -6,6 +6,7 @@ dummy.txt
 *.vim
 
 # 内部开发文件
+.claude/
 CLAUDE.md
 PROGRESS.md
 TECHNICAL_NOTES.md
@@ -26,6 +27,7 @@ test_*.lua
 .DS_Store
 Thumbs.db
 .nvimlog
+.serena/
 
 # Vendor dependencies
 vendor/
