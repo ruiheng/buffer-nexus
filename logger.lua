@@ -180,22 +180,36 @@ end
 -- Configuration functions
 function M.enable(log_file_path, log_level)
     logger_state.enabled = true
-    logger_state.log_file = log_file_path or vim.fn.expand("~/vbl-debug.log")
+    local requested_path = log_file_path or "~/vbl-debug.log"
+    local expanded_path = vim.fn.expand(requested_path)
+    logger_state.log_file = expanded_path
     logger_state.log_level = log_level or "INFO"
     logger_state.session_id = nil -- Reset session ID
     
     -- Create/clear log file
     if logger_state.log_file then
+        local parent_dir = vim.fn.fnamemodify(logger_state.log_file, ":h")
+        if parent_dir and parent_dir ~= "" and parent_dir ~= "." then
+            pcall(vim.fn.mkdir, parent_dir, "p")
+        end
         local file = io.open(logger_state.log_file, "w")
         if file then
             file:write(string.format("=== BN Debug Log Started at %s ===\n", get_timestamp()))
             file:write(string.format("Session ID: %s\n", get_session_id()))
             file:write(string.format("Log Level: %s\n\n", logger_state.log_level))
             file:close()
+        else
+            -- Don't keep trying to write to an invalid path; keep in-memory logging.
+            local failed_path = logger_state.log_file
+            logger_state.log_file = nil
+            vim.schedule(function()
+                vim.notify("BN debug logging: failed to open log file: " .. tostring(failed_path), vim.log.levels.ERROR)
+            end)
         end
     end
     
     M.info("logger", "Debug logging enabled", {
+        requested = requested_path,
         log_file = logger_state.log_file,
         log_level = logger_state.log_level
     })

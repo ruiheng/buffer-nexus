@@ -931,7 +931,9 @@ function M.setup()
         local log_level = args_list[2] or "INFO"
         
         logger.enable(log_file, log_level)
-        vim.notify(string.format("BN debug logging enabled: %s (level: %s)", log_file, log_level), vim.log.levels.INFO)
+        local status = logger.get_status()
+        local actual = status.log_file or "in-memory only (file open failed)"
+        vim.notify(string.format("BN debug logging enabled: %s (level: %s)", actual, log_level), vim.log.levels.INFO)
     end, {
         nargs = "*",
         desc = "Enable BN debug logging. Args: [log_file] [log_level]. Example: :BNDebugEnable ~/bn.log DEBUG"
