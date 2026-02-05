@@ -61,6 +61,38 @@ local pick_input_ns_id = api.nvim_create_namespace("BufferNexusPickInput")
 local flash_ns_id = api.nvim_create_namespace("BufferNexusFlash")
 
 local switch_to_buffer_in_main_window
+local uv = vim.uv or vim.loop
+
+local last_mouse_dispatch = {
+    ms = 0,
+    winid = nil,
+    line = nil,
+    col = nil,
+}
+
+local function is_clickable_sidebar_line(line_number)
+    if not line_number or line_number < 1 then
+        return false
+    end
+
+    local line_to_buffer = state_module.get_line_to_buffer_id()
+    if line_to_buffer[line_number] then
+        return true
+    end
+
+    local ranges = state_module.get_line_buffer_ranges()
+    if ranges[line_number] and #ranges[line_number] > 0 then
+        return true
+    end
+
+    local headers = state_module.get_group_header_lines()
+    local header = headers[line_number - 1]
+    if header and (header.group_id or header.is_group_entry) then
+        return true
+    end
+
+    return false
+end
 
 -- Extended picking mode state
 local extended_picking_state = {
@@ -4144,6 +4176,8 @@ local function apply_adaptive_width(content_width)
         if config_module.settings.floating then
             local win_config = api.nvim_win_get_config(win_id)
             if win_config and win_config.relative ~= "" then
+                local placeholder_win_id = state_module.get_placeholder_win_id()
+                local is_horizontal_overlay = placeholder_win_id and api.nvim_win_is_valid(placeholder_win_id)
                 local screen_width = vim.o.columns
                 local new_col = screen_width - new_width
                 api.nvim_win_set_config(win_id, {
@@ -4154,7 +4188,8 @@ local function apply_adaptive_width(content_width)
                     row = win_config.row,
                     style = 'minimal',
                     border = 'none',
-                    focusable = false,
+                    focusable = is_horizontal_overlay and true or false,
+                    mouse = true,
                 })
             end
         end
@@ -4220,7 +4255,7 @@ local function create_horizontal_overlay(placeholder_win_id, buf_id, placeholder
         row = row,
         style = 'minimal',
         border = 'none',
-        focusable = false,
+        focusable = true,
         zindex = 50,
         mouse = true,
     })
@@ -4332,8 +4367,9 @@ local function apply_horizontal_height(content_height)
                 row = row,
                 style = 'minimal',
                 border = 'none',
-                focusable = false,
+                focusable = true,
                 zindex = 50,
+                mouse = true,
             })
             configure_sidebar_window(win_id, true)
             return
@@ -5585,7 +5621,7 @@ end
 
 --- Setup standard keymaps for sidebar buffer
 local function setup_sidebar_keymaps(buf_id)
-    local keymap_opts = { noremap = true, silent = true }
+    local keymap_opts = { noremap = true, silent = true, nowait = true }
     
     -- Navigation
     api.nvim_buf_set_keymap(buf_id, "n", "j", "j", keymap_opts)
@@ -5602,13 +5638,49 @@ local function setup_sidebar_keymaps(buf_id)
     api.nvim_buf_set_keymap(buf_id, "n", "p", ":lua require('buffer-nexus').cycle_show_path_setting()<CR>", keymap_opts)
     api.nvim_buf_set_keymap(buf_id, "n", "h", ":lua require('buffer-nexus').cycle_show_history_setting()<CR>", keymap_opts)
     
-    -- Mouse support - simple approach
-    api.nvim_buf_set_keymap(buf_id, "n", "<LeftRelease>", ":lua require('buffer-nexus').handle_mouse_click()<CR>", keymap_opts)
-    api.nvim_buf_set_keymap(buf_id, "n", "<LeftMouse>", "<LeftMouse>", keymap_opts)
+    -- Mouse support
+    -- Different UIs/terminals can emit either <LeftMouse> or <LeftRelease> (or both).
+    -- Bind both, and dedupe in handle_mouse_click().
+    for _, mode in ipairs({ "n", "i" }) do
+        api.nvim_buf_set_keymap(
+            buf_id,
+            mode,
+            "<LeftMouse>",
+            ":<C-u>lua require('buffer-nexus').handle_mouse_click()<CR>",
+            keymap_opts
+        )
+        api.nvim_buf_set_keymap(
+            buf_id,
+            mode,
+            "<LeftRelease>",
+            ":<C-u>lua require('buffer-nexus').handle_mouse_click()<CR>",
+            keymap_opts
+        )
+    end
     
     -- Disable problematic keymaps
     api.nvim_buf_set_keymap(buf_id, "n", "<C-W>o", "<Nop>", keymap_opts)
     api.nvim_buf_set_keymap(buf_id, "n", "<C-W><C-O>", "<Nop>", keymap_opts)
+end
+
+local function focus_best_non_sidebar_window(sidebar_win_id, placeholder_win_id)
+    local alt_win_id = vim.fn.win_getid(vim.fn.winnr('#'))
+    if alt_win_id and alt_win_id ~= 0 and api.nvim_win_is_valid(alt_win_id) then
+        if alt_win_id ~= sidebar_win_id and alt_win_id ~= placeholder_win_id then
+            api.nvim_set_current_win(alt_win_id)
+            return
+        end
+    end
+
+    for _, win_id in ipairs(api.nvim_list_wins()) do
+        if win_id ~= sidebar_win_id and win_id ~= placeholder_win_id and api.nvim_win_is_valid(win_id) then
+            local win_config = api.nvim_win_get_config(win_id)
+            if win_config.relative == "" then
+                api.nvim_set_current_win(win_id)
+                return
+            end
+        end
+    end
 end
 
 --- Opens the sidebar window.
@@ -5684,7 +5756,7 @@ local function open_sidebar(position_override)
                 row = row,
                 style = 'minimal',
                 border = 'none',
-                focusable = false,
+                focusable = true,
                 mouse = true,
             })
             configure_sidebar_window(new_win_id, true)
@@ -5716,6 +5788,19 @@ local function open_sidebar(position_override)
     api.nvim_create_augroup(group_name, { clear = true })
 
     local is_repositioning = false
+    local function is_horizontal_overlay_win(win_id)
+        if not (win_id and api.nvim_win_is_valid(win_id)) then
+            return false
+        end
+        if not is_horizontal then
+            return false
+        end
+        if win_id ~= new_win_id then
+            return false
+        end
+        local config = api.nvim_win_get_config(win_id)
+        return config and config.relative ~= ""
+    end
     local function redirect_from_sidebar()
         -- Wait a short delay to allow mouse click processing
         vim.defer_fn(function()
@@ -5997,18 +6082,73 @@ function M.handle_mouse_click()
     if not state_module.is_sidebar_open() then 
         return 
     end
-    
+
     -- Get mouse position
     local mouse_pos = vim.fn.getmousepos()
     
     local sidebar_win_id = state_module.get_win_id()
-    if not mouse_pos or mouse_pos.winid ~= sidebar_win_id then
+    if not mouse_pos then
+        return
+    end
+
+    -- Be tolerant: depending on 'mousemodel' / focus redirects, getmousepos().winid can be
+    -- missing or briefly report an unexpected window. Prefer validating by buffer identity.
+    if mouse_pos.winid and sidebar_win_id and mouse_pos.winid ~= 0 and mouse_pos.winid ~= sidebar_win_id then
+        local sidebar_buf = state_module.get_buf_id()
+        local ok, win_buf = pcall(api.nvim_win_get_buf, mouse_pos.winid)
+        if not (ok and sidebar_buf and win_buf == sidebar_buf) then
+            return
+        end
+    end
+
+    local sidebar_buf_id = state_module.get_buf_id()
+    local buf_line_count = nil
+    if sidebar_buf_id and api.nvim_buf_is_valid(sidebar_buf_id) then
+        buf_line_count = api.nvim_buf_line_count(sidebar_buf_id)
+    end
+
+    -- getmousepos() can report a bogus buffer line (e.g. 999999) in some cases.
+    -- Fall back to winrow/wincol -> (line('w0') + winrow - 1).
+    local line = mouse_pos.line
+    if line == nil or line < 1 or (buf_line_count and line > buf_line_count) then
+        if sidebar_win_id and api.nvim_win_is_valid(sidebar_win_id) and mouse_pos.winrow and mouse_pos.winrow > 0 then
+            line = api.nvim_win_call(sidebar_win_id, function()
+                return vim.fn.line('w0') + mouse_pos.winrow - 1
+            end)
+        end
+    end
+
+    local col = mouse_pos.column
+    if col == nil or col < 1 then
+        col = mouse_pos.wincol
+    end
+    if col == nil or col < 1 then
+        col = 1
+    end
+
+    if not line or line < 1 then
+        if api.nvim_get_current_win() == sidebar_win_id then
+            focus_best_non_sidebar_window(sidebar_win_id, state_module.get_placeholder_win_id())
+        end
         return
     end
     
     -- Handle selection directly using mouse position
-    local col = (mouse_pos.column or 1) - 1
-    M.handle_selection(nil, mouse_pos.line, col)
+    -- Dedupe: some UIs send both <LeftMouse> and <LeftRelease> for a single click.
+    local now = uv and uv.now and uv.now() or 0
+    if last_mouse_dispatch.winid == sidebar_win_id
+        and last_mouse_dispatch.line == line
+        and last_mouse_dispatch.col == col
+        and (now - (last_mouse_dispatch.ms or 0)) < 120 then
+        return
+    end
+
+    last_mouse_dispatch.ms = now
+    last_mouse_dispatch.winid = sidebar_win_id
+    last_mouse_dispatch.line = line
+    last_mouse_dispatch.col = col
+
+    M.handle_selection(nil, line, col - 1)
 end
 
 --- Cycle through show_path settings (yes -> no -> auto -> yes)
@@ -6121,6 +6261,9 @@ function M.handle_selection(captured_buffer_id, captured_line_number, captured_c
                             local label = format_group_switch_label(target_group, range.group_id)
                             vim.notify("Switched to group: " .. label, vim.log.levels.INFO)
                         end
+                        if api.nvim_get_current_win() == state_module.get_win_id() then
+                            focus_best_non_sidebar_window(state_module.get_win_id(), state_module.get_placeholder_win_id())
+                        end
                         return
                     end
                     break
@@ -6144,9 +6287,15 @@ function M.handle_selection(captured_buffer_id, captured_line_number, captured_c
                 
                 groups.set_active_group(header_info.group_id)
                 vim.notify("Switched to group: " .. group_name, vim.log.levels.INFO)
+                if api.nvim_get_current_win() == state_module.get_win_id() then
+                    focus_best_non_sidebar_window(state_module.get_win_id(), state_module.get_placeholder_win_id())
+                end
                 return
             elseif header_info.type == "separator" or header_info.type == "separator_visual" then
                 -- Ignore clicks on separator lines
+                if api.nvim_get_current_win() == state_module.get_win_id() then
+                    focus_best_non_sidebar_window(state_module.get_win_id(), state_module.get_placeholder_win_id())
+                end
                 return
             end
         end
@@ -6154,6 +6303,9 @@ function M.handle_selection(captured_buffer_id, captured_line_number, captured_c
     
     -- If no buffer mapping found, this might be a non-clickable line
     if not bufnr then
+        if api.nvim_get_current_win() == state_module.get_win_id() then
+            focus_best_non_sidebar_window(state_module.get_win_id(), state_module.get_placeholder_win_id())
+        end
         return
     end
     
@@ -6219,13 +6371,37 @@ function M.handle_selection(captured_buffer_id, captured_line_number, captured_c
         end
     end
     
-    -- STEP 2: Find the main window (not the sidebar) and switch to buffer
+    -- STEP 2: Choose a target "main" window and switch to buffer there.
+    -- Horizontal mode uses a placeholder split window; never open buffers into it.
+    local sidebar_win_id = state_module.get_win_id()
+    local placeholder_win_id = state_module.get_placeholder_win_id()
+
+    local function is_normal_target_window(win_id)
+        if not (win_id and api.nvim_win_is_valid(win_id)) then
+            return false
+        end
+        if win_id == sidebar_win_id or win_id == placeholder_win_id then
+            return false
+        end
+        local win_config = api.nvim_win_get_config(win_id)
+        return win_config.relative == "" -- non-floating window
+    end
+
+    local current_win_id = api.nvim_get_current_win()
+    local alt_win_id = vim.fn.win_getid(vim.fn.winnr('#'))
+
     local main_win_id = nil
-    for _, win_id in ipairs(api.nvim_list_wins()) do
-        if win_id ~= state_module.get_win_id() and api.nvim_win_is_valid(win_id) then
-            -- Check if this window is not a floating window or special window
-            local win_config = api.nvim_win_get_config(win_id)
-            if win_config.relative == "" then  -- Not a floating window
+
+    -- Prefer "alternate window" (the one you were editing before entering sidebar)
+    if alt_win_id and alt_win_id ~= 0 and is_normal_target_window(alt_win_id) then
+        main_win_id = alt_win_id
+    elseif is_normal_target_window(current_win_id) then
+        -- If the click didn't focus the sidebar, current might already be a normal window.
+        main_win_id = current_win_id
+    else
+        -- Fallback: pick the first normal non-sidebar non-placeholder window.
+        for _, win_id in ipairs(api.nvim_list_wins()) do
+            if is_normal_target_window(win_id) then
                 main_win_id = win_id
                 break
             end
@@ -6233,19 +6409,20 @@ function M.handle_selection(captured_buffer_id, captured_line_number, captured_c
     end
 
     if main_win_id then
-        -- Switch to the main window and set the buffer there
         local success, err = pcall(function()
-            api.nvim_set_current_win(main_win_id)
-            api.nvim_set_current_buf(bufnr)
+            api.nvim_win_set_buf(main_win_id, bufnr)
+            if api.nvim_get_current_win() ~= main_win_id then
+                api.nvim_set_current_win(main_win_id)
+            end
         end)
         if not success then
             vim.notify("Error switching to buffer: " .. err, vim.log.levels.ERROR)
             return
         end
     else
-        -- Fallback: if no main window found, create a new split
+        -- Worst-case fallback: try previous window command, but keep placeholder excluded above.
         local success, err = pcall(function()
-            vim.cmd("wincmd p")  -- Go to previous window
+            vim.cmd("wincmd p")
             api.nvim_set_current_buf(bufnr)
         end)
         if not success then
