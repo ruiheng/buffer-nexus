@@ -4382,6 +4382,15 @@ local function apply_horizontal_height(content_height)
     end
 end
 
+-- Helper to refresh horizontal overlay with current buffer line count
+local function refresh_horizontal_overlay()
+    local sidebar_buf = state_module.get_buf_id()
+    if sidebar_buf and api.nvim_buf_is_valid(sidebar_buf) then
+        local line_count = api.nvim_buf_line_count(sidebar_buf)
+        apply_horizontal_height(line_count)
+    end
+end
+
 -- Finalize buffer display with lines and mapping
 local function finalize_buffer_display(lines_text, new_line_map, line_group_context, group_header_lines, line_infos, line_types, line_components, line_buffer_ranges, position, target_line, current_buffer_id, active_group_id)
     api.nvim_buf_set_option(state_module.get_buf_id(), "modifiable", true)
@@ -5898,6 +5907,11 @@ local function open_sidebar(position_override)
             move_cmd = "wincmd J"
         end
 
+        -- Always refresh the overlay to ensure it covers the placeholder properly
+        -- This is needed because window layout changes (e.g., new windows) can
+        -- affect the visual gap even if the placeholder doesn't need to move
+        refresh_horizontal_overlay()
+
         if not move_cmd then
             return
         end
@@ -5911,13 +5925,10 @@ local function open_sidebar(position_override)
         end
         is_repositioning = false
 
-        local sidebar_buf = state_module.get_buf_id()
-        if sidebar_buf and api.nvim_buf_is_valid(sidebar_buf) then
-            local line_count = api.nvim_buf_line_count(sidebar_buf)
-            apply_horizontal_height(line_count)
-        end
+        -- Re-apply overlay after repositioning to ensure proper gap coverage
+        refresh_horizontal_overlay()
     end
-    
+
     -- Handle window resize for floating sidebar (only needed in floating mode)
     if use_floating then
         api.nvim_create_autocmd("VimResized", {
@@ -5951,8 +5962,7 @@ local function open_sidebar(position_override)
                 if not api.nvim_win_is_valid(new_win_id) then
                     return
                 end
-                local line_count = api.nvim_buf_line_count(buf_id)
-                apply_horizontal_height(line_count)
+                refresh_horizontal_overlay()
             end,
             desc = "Resize horizontal floating overlay when window is resized"
         })
@@ -5981,22 +5991,35 @@ local function open_sidebar(position_override)
         api.nvim_create_autocmd({"FocusGained", "VimResume"}, {
             group = group_name,
             callback = function()
-                local sidebar_buf = state_module.get_buf_id()
-                if sidebar_buf and api.nvim_buf_is_valid(sidebar_buf) then
-                    local line_count = api.nvim_buf_line_count(sidebar_buf)
-                    -- Use defer_fn to ensure window position is stable before recalculating
-                    vim.defer_fn(function()
-                        if state_module.is_sidebar_open() then
-                            local current_buf = state_module.get_buf_id()
-                            if current_buf and api.nvim_buf_is_valid(current_buf) then
-                                local current_lines = api.nvim_buf_line_count(current_buf)
-                                apply_horizontal_height(current_lines)
-                            end
-                        end
-                    end, 50)
-                end
+                -- Use defer_fn to ensure window position is stable before recalculating
+                vim.defer_fn(function()
+                    if state_module.is_sidebar_open() then
+                        refresh_horizontal_overlay()
+                    end
+                end, 50)
             end,
             desc = "Refresh horizontal overlay position when nvim regains focus"
+        })
+
+        -- Refresh horizontal overlay when mode changes (e.g., insert -> normal)
+        -- This fixes the statusline visibility issue when fugitive commit window
+        -- shows its statusline after switching from insert to normal mode
+        api.nvim_create_autocmd("ModeChanged", {
+            group = group_name,
+            pattern = "[iIcCtTfFl]*:n*",
+            callback = function()
+                -- Only refresh if sidebar is open
+                if not state_module.is_sidebar_open() then
+                    return
+                end
+                -- Use defer_fn to let the mode change settle before refreshing
+                vim.defer_fn(function()
+                    if state_module.is_sidebar_open() then
+                        refresh_horizontal_overlay()
+                    end
+                end, 30)
+            end,
+            desc = "Refresh horizontal overlay when switching from insert to normal mode"
         })
     else
         -- For split windows, add WinEnter redirect with delay for mouse clicks
