@@ -5975,6 +5975,29 @@ local function open_sidebar(position_override)
             end,
             desc = "Keep horizontal placeholder anchored to the edge"
         })
+
+        -- Refresh horizontal overlay position when focus returns to nvim
+        -- This fixes the statusline visibility issue when switching back from another app
+        api.nvim_create_autocmd({"FocusGained", "VimResume"}, {
+            group = group_name,
+            callback = function()
+                local sidebar_buf = state_module.get_buf_id()
+                if sidebar_buf and api.nvim_buf_is_valid(sidebar_buf) then
+                    local line_count = api.nvim_buf_line_count(sidebar_buf)
+                    -- Use defer_fn to ensure window position is stable before recalculating
+                    vim.defer_fn(function()
+                        if state_module.is_sidebar_open() then
+                            local current_buf = state_module.get_buf_id()
+                            if current_buf and api.nvim_buf_is_valid(current_buf) then
+                                local current_lines = api.nvim_buf_line_count(current_buf)
+                                apply_horizontal_height(current_lines)
+                            end
+                        end
+                    end, 50)
+                end
+            end,
+            desc = "Refresh horizontal overlay position when nvim regains focus"
+        })
     else
         -- For split windows, add WinEnter redirect with delay for mouse clicks
         api.nvim_create_autocmd("WinEnter", {
