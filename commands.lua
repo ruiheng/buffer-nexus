@@ -605,7 +605,7 @@ function M.setup()
     })
 
     vim.api.nvim_create_user_command("BNPickClose", function()
-        require('buffer-nexus').pick_close()
+        require('buffer-nexus').pick_close_buffer()
     end, {
         nargs = 0,
         desc = "Pick a buffer across groups and close it"
