@@ -2362,7 +2362,10 @@ local function open_menu(lines, title)
     api.nvim_set_current_win(win_id)
 end
 
-local function can_open_popup_menu()
+local function can_open_popup_menu(opts)
+    opts = opts or {}
+    local require_current_buffer_in_group = opts.require_current_buffer_in_group ~= false
+
     local current_win = api.nvim_get_current_win()
     local sidebar_win = state_module.get_win_id()
     if sidebar_win and current_win == sidebar_win then
@@ -2388,7 +2391,11 @@ local function can_open_popup_menu()
         return false
     end
 
-    return groups.find_buffer_group(buf_id) ~= nil
+    if require_current_buffer_in_group then
+        return groups.find_buffer_group(buf_id) ~= nil
+    end
+
+    return true
 end
 
 local function get_menu_max_hint_len(items)
@@ -5345,6 +5352,102 @@ function M.menu_confirm_input()
     end
 end
 
+local function open_popup_pick_menu(mode_type)
+    if not can_open_popup_menu({ require_current_buffer_in_group = false }) then
+        vim.notify("Pick menu requires a normal file window", vim.log.levels.WARN)
+        return false
+    end
+
+    local all_groups = groups.get_all_groups()
+    if #all_groups == 0 then
+        vim.notify("No groups available", vim.log.levels.INFO)
+        return false
+    end
+
+    local active_group = groups.get_active_group()
+    local active_group_id = active_group and active_group.id or nil
+
+    local all_group_buffers = {}
+    local unique_buffer_ids = {}
+    local seen_buffers = {}
+    local items = {}
+
+    for _, group in ipairs(all_groups) do
+        local group_number = group.display_number or group.id
+        local group_name = group.name and group.name ~= "" and (" " .. group.name) or ""
+        local group_label = string.format("[%s]%s", tostring(group_number), group_name)
+
+        for _, buf_id in ipairs(group.buffers or {}) do
+            if api.nvim_buf_is_valid(buf_id) and not utils.is_special_buffer(buf_id) then
+                table.insert(all_group_buffers, { buffer_id = buf_id, group_id = group.id })
+                if not seen_buffers[buf_id] then
+                    seen_buffers[buf_id] = true
+                    table.insert(unique_buffer_ids, buf_id)
+                end
+                table.insert(items, {
+                    id = buf_id,
+                    group_id = group.id,
+                    group_label = group_label,
+                    is_modified = is_buffer_actually_modified(buf_id),
+                    git_status = components.get_git_status(buf_id),
+                    lsp_status = components.get_lsp_status(buf_id),
+                })
+            end
+        end
+    end
+
+    if #items == 0 then
+        vim.notify("No buffers available for picking", vim.log.levels.INFO)
+        return false
+    end
+
+    local current_win = api.nvim_get_current_win()
+    local window_width = 40
+    if current_win and api.nvim_win_is_valid(current_win) then
+        window_width = api.nvim_win_get_width(current_win)
+    end
+    local name_map = build_name_map(unique_buffer_ids, window_width)
+
+    for _, item in ipairs(items) do
+        local filename = name_map[item.id]
+        if not filename or filename == "" then
+            local buf_name = api.nvim_buf_get_name(item.id)
+            filename = buf_name == "" and "[No Name]" or vim.fn.fnamemodify(buf_name, ":t")
+        end
+        item.name = string.format("%s %s", item.group_label, filename)
+    end
+
+    local buffer_hints = generate_buffer_pick_chars(all_group_buffers, {}, active_group_id, true)
+    assign_menu_pick_chars(items, buffer_hints)
+
+    local title = mode_type == "close" and "Pick Close" or "Pick Buffer"
+    local lines = build_menu_lines(items, true)
+    open_menu(lines, title)
+
+    local current_buffer_id = get_main_window_current_buffer()
+    setup_menu_mappings(items, function(item)
+        if mode_type == "close" then
+            close_buffer_from_group(item.id, item.group_id)
+        else
+            switch_to_buffer_and_group(item.id, item.group_id)
+        end
+    end, true, 1)
+    menu_state.current_buffer_id = current_buffer_id
+    apply_menu_highlights(items, true, 1, nil, current_buffer_id)
+
+    for i, item in ipairs(items) do
+        if item.id == current_buffer_id and (active_group_id == nil or item.group_id == active_group_id) then
+            local win_id = menu_state.win_id
+            if win_id and api.nvim_win_is_valid(win_id) then
+                api.nvim_win_set_cursor(win_id, { i + 1, 0 })
+            end
+            break
+        end
+    end
+
+    return true
+end
+
 function M.open_buffer_menu()
     if not can_open_popup_menu() then
         return
@@ -6581,11 +6684,19 @@ end
 --- Pick a buffer across groups using extended hints
 --- Pick a buffer to switch to (works with or without bufferline)
 function M.pick_buffer()
+    if not state_module.is_sidebar_open() then
+        open_popup_pick_menu("switch")
+        return
+    end
     start_extended_picking("switch")
 end
 
 --- Pick a buffer to close (works with or without bufferline)
 function M.pick_close_buffer()
+    if not state_module.is_sidebar_open() then
+        open_popup_pick_menu("close")
+        return
+    end
     start_extended_picking("close")
 end
 
