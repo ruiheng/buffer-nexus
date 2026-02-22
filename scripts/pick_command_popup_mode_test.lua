@@ -23,6 +23,15 @@ local ok, err = pcall(function()
     local tmpdir = vim.fn.tempname()
     vim.fn.mkdir(tmpdir, "p")
 
+    local function capture_menu_hints()
+        local hints = {}
+        for _, item in ipairs(vbl._menu_items or {}) do
+            local key = string.format("%s:%s", tostring(item.group_id or "nogroup"), tostring(item.id))
+            hints[key] = item.hint
+        end
+        return hints
+    end
+
     vbl.setup({ position = "left", floating = false, pick_chars = "abc", auto_open = false })
     groups.setup({ auto_add_new_buffers = false })
     bufferline_integration.is_available = function()
@@ -42,6 +51,37 @@ local ok, err = pcall(function()
         vbl.close_sidebar()
     end
     assert_ok(not state.is_sidebar_open(), "sidebar should remain closed before pick commands")
+
+    -- Hint stability: same menu should keep same hints across repeated open/close.
+    local ok_preview, preview_err = pcall(vim.cmd, "BNPick")
+    assert_ok(ok_preview, "BNPick preview should succeed: " .. tostring(preview_err))
+    local first_menu_hints = capture_menu_hints()
+    vbl.close_menu()
+    vim.wait(40)
+
+    local ok_preview_repeat, preview_repeat_err = pcall(vim.cmd, "BNPick")
+    assert_ok(ok_preview_repeat, "BNPick repeat preview should succeed: " .. tostring(preview_repeat_err))
+    local second_menu_hints = capture_menu_hints()
+    for key, hint in pairs(first_menu_hints) do
+        assert_ok(second_menu_hints[key] == hint, "expected stable hint across repeated menu open for " .. key)
+    end
+    vbl.close_menu()
+    vim.wait(40)
+
+    -- Add one buffer and verify existing buffers keep their hints.
+    local extra_path = string.format("%s/%03d.txt", tmpdir, 3)
+    vim.fn.writefile({ "x" }, extra_path)
+    vim.cmd("edit " .. vim.fn.fnameescape(extra_path))
+    groups.add_buffer_to_group(vim.api.nvim_get_current_buf(), "default")
+
+    local ok_preview_growth, preview_growth_err = pcall(vim.cmd, "BNPick")
+    assert_ok(ok_preview_growth, "BNPick growth preview should succeed: " .. tostring(preview_growth_err))
+    local third_menu_hints = capture_menu_hints()
+    for key, hint in pairs(first_menu_hints) do
+        assert_ok(third_menu_hints[key] == hint, "expected existing hint to remain stable after adding buffer for " .. key)
+    end
+    vbl.close_menu()
+    vim.wait(40)
 
     local before_pick_buf = vim.api.nvim_get_current_buf()
     local active_group = groups.get_active_group()

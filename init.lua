@@ -124,6 +124,45 @@ local menu_state = {
     current_buffer_id = nil,
 }
 
+-- Stable pick-hint cache for popup/sidebar remap flows.
+-- key is a stable identity (path-based, optionally group-scoped), value is hint.
+local pick_hint_cache = {}
+
+local function extract_group_id_from_pick_cache_key(cache_key)
+    if type(cache_key) ~= "string" then
+        return nil
+    end
+    return cache_key:match("^group:([^|]+)|")
+end
+
+local function clear_pick_hint_cache_for_group(group_id)
+    if group_id == nil then
+        return
+    end
+    local prefix = "group:" .. tostring(group_id) .. "|"
+    for cache_key, _ in pairs(pick_hint_cache) do
+        if cache_key:sub(1, #prefix) == prefix then
+            pick_hint_cache[cache_key] = nil
+        end
+    end
+end
+
+local function clear_stale_pick_hint_cache_groups()
+    local valid_groups = {}
+    for _, group in ipairs(groups.get_all_groups() or {}) do
+        if group and group.id ~= nil then
+            valid_groups[tostring(group.id)] = true
+        end
+    end
+
+    for cache_key, _ in pairs(pick_hint_cache) do
+        local group_id = extract_group_id_from_pick_cache_key(cache_key)
+        if group_id and not valid_groups[group_id] then
+            pick_hint_cache[cache_key] = nil
+        end
+    end
+end
+
 local function close_menu(opts)
     opts = opts or {}
     local restore_prev = opts.restore_prev ~= false
@@ -576,6 +615,38 @@ local function get_pick_char_lists()
         end
     end
     return base_list, prefix_list
+end
+
+local function normalize_pick_buffer_identity(buf_id)
+    if type(buf_id) ~= "number" then
+        return nil
+    end
+
+    if api.nvim_buf_is_valid(buf_id) then
+        local buf_name = api.nvim_buf_get_name(buf_id)
+        if type(buf_name) == "string" and buf_name ~= "" then
+            local normalized = vim.fn.fnamemodify(buf_name, ":p")
+            if normalized and normalized ~= "" then
+                return "path:" .. normalized
+            end
+        end
+    end
+
+    return "buf:" .. tostring(buf_id)
+end
+
+local function get_item_pick_cache_key(item)
+    if type(item) ~= "table" then
+        return nil
+    end
+    local buffer_key = normalize_pick_buffer_identity(item.id)
+    if not buffer_key then
+        return nil
+    end
+    if item.group_id ~= nil then
+        return string.format("group:%s|%s", tostring(item.group_id), buffer_key)
+    end
+    return "buffer:" .. buffer_key
 end
 
 local function generate_variable_pick_char(index, base_list, prefix_list)
@@ -2591,6 +2662,22 @@ local function assign_menu_pick_chars(items, buffer_hints, opts)
         return true
     end
 
+    -- Reuse stable cached hints first (if still valid and conflict-free).
+    -- This keeps existing buffers' hints steady across repeated pick sessions.
+    for _, item in ipairs(items) do
+        if not item.hint then
+            local cache_key = get_item_pick_cache_key(item)
+            local cached_hint = cache_key and pick_hint_cache[cache_key] or nil
+            if cached_hint and is_available_hint(cached_hint) then
+                item.hint = cached_hint
+                used[cached_hint] = true
+                if #cached_hint == 1 then
+                    used_single[cached_hint] = true
+                end
+            end
+        end
+    end
+
     -- Assign based on filename letters (left to right), try lower then upper
     for _, item in ipairs(items) do
         if not item.hint then
@@ -2662,6 +2749,16 @@ local function assign_menu_pick_chars(items, buffer_hints, opts)
                         break
                     end
                 end
+            end
+        end
+    end
+
+    -- Persist latest hint assignment for stable future reuse.
+    for _, item in ipairs(items) do
+        if item.hint and item.hint ~= "" then
+            local cache_key = get_item_pick_cache_key(item)
+            if cache_key then
+                pick_hint_cache[cache_key] = item.hint
             end
         end
     end
@@ -5358,6 +5455,8 @@ local function open_popup_pick_menu(mode_type)
         return false
     end
 
+    clear_stale_pick_hint_cache_groups()
+
     local all_groups = groups.get_all_groups()
     if #all_groups == 0 then
         vim.notify("No groups available", vim.log.levels.INFO)
@@ -7262,6 +7361,26 @@ function M.setup(user_config)
 
     -- Set up pick mode highlights
     setup_pick_highlights()
+
+    local pick_cache_augroup = api.nvim_create_augroup("BufferNexusPickHintCache", { clear = true })
+    api.nvim_create_autocmd("User", {
+        group = pick_cache_augroup,
+        pattern = config_module.EVENTS.GROUP_DELETED,
+        callback = function(event)
+            local group_id = event and event.data and event.data.group_id or nil
+            clear_pick_hint_cache_for_group(group_id)
+            clear_stale_pick_hint_cache_groups()
+        end,
+        desc = "Clear pick-hint cache for deleted groups",
+    })
+    api.nvim_create_autocmd("User", {
+        group = pick_cache_augroup,
+        pattern = config_module.EVENTS.GROUP_CHANGED,
+        callback = function()
+            clear_stale_pick_hint_cache_groups()
+        end,
+        desc = "Prune stale group-scoped pick-hint cache",
+    })
 end
 
 switch_to_buffer_in_main_window = function(buffer_id, error_prefix)
