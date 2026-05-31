@@ -6173,11 +6173,11 @@ local function open_sidebar(position_override)
             group = group_name,
             callback = function()
                 local current_win = api.nvim_get_current_win()
-                if current_win == placeholder_win_id and not is_repositioning then
+                if (current_win == new_win_id or current_win == placeholder_win_id) and not is_repositioning then
                     redirect_from_sidebar()
                 end
             end,
-            desc = "Redirect focus away from horizontal placeholder window"
+            desc = "Redirect focus away from horizontal sidebar windows"
         })
 
         api.nvim_create_autocmd({"WinEnter", "WinNew", "WinClosed"}, {

@@ -37,6 +37,8 @@ vim.cmd("edit " .. vim.fn.fnameescape(file1))
 vbl.toggle()
 local placeholder_win_id = state.get_placeholder_win_id()
 assert_ok(placeholder_win_id and vim.api.nvim_win_is_valid(placeholder_win_id), "placeholder window should exist")
+local sidebar_win_id = state.get_win_id()
+assert_ok(sidebar_win_id and vim.api.nvim_win_is_valid(sidebar_win_id), "sidebar overlay window should exist")
 
 vim.api.nvim_set_current_win(placeholder_win_id)
 vim.wait(700, function()
@@ -44,6 +46,13 @@ vim.wait(700, function()
 end)
 
 assert_ok(vim.api.nvim_get_current_win() ~= placeholder_win_id, "focus should redirect away from placeholder")
+
+vim.api.nvim_set_current_win(sidebar_win_id)
+vim.wait(700, function()
+    return vim.api.nvim_get_current_win() ~= sidebar_win_id
+end)
+
+assert_ok(vim.api.nvim_get_current_win() ~= sidebar_win_id, "focus should redirect away from sidebar overlay")
 
 print("OK: horizontal focus redirect check")
 end)
