@@ -7000,7 +7000,7 @@ local function initialize_plugin()
     api.nvim_command("augroup BufferNexusGlobal")
     api.nvim_command("autocmd!")
     -- TEMP DISABLED: api.nvim_command("autocmd BufEnter,BufDelete,BufWipeout * lua require('buffer-nexus').refresh_if_open()")
-    api.nvim_command("autocmd BufWritePost * lua require('buffer-nexus').refresh_if_open()")
+    api.nvim_command("autocmd BufNewFile,BufWritePost * lua require('buffer-nexus').refresh_if_open()")
     api.nvim_command("autocmd WinClosed * lua require('buffer-nexus').check_quit_condition()")
     api.nvim_command("autocmd WinEnter * lua require('buffer-nexus').handle_win_enter()")
 
