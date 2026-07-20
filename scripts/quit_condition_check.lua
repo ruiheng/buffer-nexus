@@ -129,9 +129,28 @@ end)
 assert_ok(not quit_called, "should not quit when normal window exists (horizontal)")
 close_sidebar()
 
--- Case 3: vertical sidebar only should quit
+-- Case 3: vertical sidebar only with modified hidden buffer should NOT quit
 setup_position("left")
-local normal_win_id = ensure_normal_window(state)
+normal_win_id = ensure_normal_window(state)
+open_sidebar()
+local modified_buf = vim.api.nvim_create_buf(true, false)
+vim.api.nvim_buf_set_name(modified_buf, vim.fn.tempname() .. "_bn_dirty")
+vim.api.nvim_buf_set_lines(modified_buf, 0, -1, false, { "dirty" })
+vim.api.nvim_win_close(normal_win_id, true)
+
+quit_called = with_qall_capture(function()
+    vbl.check_quit_condition()
+    vim.wait(200)
+end)
+assert_ok(not quit_called, "should not quit when a modified normal buffer exists")
+vim.api.nvim_buf_delete(modified_buf, { force = true })
+normal_win_id = ensure_normal_window(state)
+assert_ok(normal_win_id and vim.api.nvim_win_is_valid(normal_win_id), "normal window should be recoverable after dirty quit guard")
+close_sidebar()
+
+-- Case 4: vertical sidebar only should quit
+setup_position("left")
+normal_win_id = ensure_normal_window(state)
 open_sidebar()
 assert_ok(normal_win_id and vim.api.nvim_win_is_valid(normal_win_id), "normal window should exist before close (vertical)")
 
@@ -147,7 +166,7 @@ normal_win_id = ensure_normal_window(state)
 assert_ok(normal_win_id and vim.api.nvim_win_is_valid(normal_win_id), "normal window should be recoverable after vertical close")
 close_sidebar()
 
--- Case 4: horizontal sidebar + placeholder only should quit
+-- Case 5: horizontal sidebar + placeholder only should quit
 setup_position("top")
 normal_win_id = ensure_normal_window(state)
 open_sidebar()
