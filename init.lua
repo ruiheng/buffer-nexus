@@ -7000,7 +7000,7 @@ local function initialize_plugin()
     api.nvim_command("augroup BufferNexusGlobal")
     api.nvim_command("autocmd!")
     -- TEMP DISABLED: api.nvim_command("autocmd BufEnter,BufDelete,BufWipeout * lua require('buffer-nexus').refresh_if_open()")
-    api.nvim_command("autocmd BufWritePost * lua require('buffer-nexus').refresh_if_open()")
+    api.nvim_command("autocmd BufNewFile,BufWritePost * lua require('buffer-nexus').refresh_if_open()")
     api.nvim_command("autocmd WinClosed * lua require('buffer-nexus').check_quit_condition()")
     api.nvim_command("autocmd WinEnter * lua require('buffer-nexus').handle_win_enter()")
 
@@ -7104,6 +7104,17 @@ function M.refresh_cursor_alignment()
     end))
 end
 
+local function has_modified_normal_buffer()
+    for _, buf_id in ipairs(api.nvim_list_bufs()) do
+        if api.nvim_buf_is_valid(buf_id)
+            and api.nvim_buf_get_option(buf_id, "buftype") == ""
+            and api.nvim_buf_get_option(buf_id, "modified") then
+            return true
+        end
+    end
+    return false
+end
+
 
 --- Check if should exit nvim (when only sidebar window remains)
 function M.check_quit_condition()
@@ -7128,7 +7139,7 @@ function M.check_quit_condition()
         end
 
         -- If only sidebar window remains, auto-exit nvim
-        if non_sidebar_windows == 0 then
+        if non_sidebar_windows == 0 and not has_modified_normal_buffer() then
             vim.cmd("qall")
         end
     end)
